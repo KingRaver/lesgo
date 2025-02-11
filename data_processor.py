@@ -68,8 +68,8 @@ class DataProcessor:
         for col in self.required_columns:
             if cleaned[col].isnull().any():
                 if col in ['market_cap', 'total_volume', 'current_price']:
-                    # For numerical columns, forward fill then backward fill
-                    cleaned[col] = cleaned[col].fillna(method='ffill').fillna(method='bfill')
+                    # For numerical columns, use ffill then bfill
+                    cleaned[col] = cleaned[col].ffill().bfill()
                 else:
                     # For categorical columns, use mode
                     cleaned[col] = cleaned[col].fillna(cleaned[col].mode()[0])
@@ -100,9 +100,10 @@ class DataProcessor:
         enhanced['relative_strength'] = enhanced.groupby('id')['current_price'].pct_change(
         ).div(enhanced['price_change_percentage_24h'].mean())
         
-        # Add market dominance
-        total_mcap = enhanced['market_cap'].sum()
-        enhanced['market_dominance'] = enhanced['market_cap'] / total_mcap * 100
+        # Calculate market dominance per timestamp
+        enhanced['market_dominance'] = enhanced.groupby('timestamp').apply(
+            lambda x: x['market_cap'] / x['market_cap'].sum() * 100
+        ).reset_index(level=0, drop=True)
         
         return enhanced
 
@@ -184,7 +185,7 @@ class DataProcessor:
         summary = {
             'total_market_cap': df['market_cap'].sum(),
             'total_volume': df['total_volume'].sum(),
-            'avg_volatility': df['volatility'].mean(),
+            'avg_volatility': np.nanmean(df['volatility']),  # Handle NaN values
             'volume_anomalies': df['volume_anomaly'].sum(),
             'price_anomalies': df['price_anomaly'].sum(),
             'timestamp': datetime.now()
