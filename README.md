@@ -81,7 +81,7 @@ BACKTEST_DAYS=90
 - Tracks performance metrics
 - Handles position sizing and risk management
 
-### 5. Parameter Optimization (`backtesting/parameter_optimizer.py`)
+### 5. Parameter Optimization (`backtesting/optimizer.py`)
 - Optimizes strategy parameters
 - Tier-specific adjustments
 - Performance scoring
