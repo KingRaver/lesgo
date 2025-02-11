@@ -271,4 +271,3 @@ Create these as dashboard parameters:
 4. Iterate and improve
 5. Document changes
 
-Remember to regularly validate your visualizations against the underlying data and maintain consistent updating schedules for optimal analysis.
