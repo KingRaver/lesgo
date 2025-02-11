@@ -21,6 +21,7 @@ class RotationDetector:
         self.volume_threshold = ANALYSIS_PARAMS['volume_threshold']
         self.correlation_threshold = ANALYSIS_PARAMS['correlation_threshold']
         self.min_confidence = ANALYSIS_PARAMS['min_confidence']
+        self.required_columns = ['market_cap', 'total_volume', 'price_change_percentage_24h']
 
     def identify_tiers(self, market_data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -32,17 +33,21 @@ class RotationDetector:
         Returns:
             pd.DataFrame: Market data with tier assignments
         """
+        # Validate input data
+        if market_data.empty:
+            raise ValueError("Empty DataFrame provided")
+        
+        missing_cols = [col for col in self.required_columns if col not in market_data.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+            
         df = market_data.copy()
         
-        # Calculate tier boundaries based on market cap
-        mcap_log = np.log10(df['market_cap'])
-        tier_boundaries = np.percentile(mcap_log, [25, 50, 75])
+        # Calculate tier boundaries for each timestamp
+        df['tier'] = df.groupby('timestamp')['market_cap'].transform(
+            lambda x: pd.qcut(np.log10(x), q=4, labels=[0, 1, 2, 3])
+        )
         
-        # Assign tiers (0 = highest, 3 = lowest)
-        df['tier'] = 3  # Default to lowest tier
-        for i, boundary in enumerate(reversed(tier_boundaries)):
-            df.loc[mcap_log >= boundary, 'tier'] = i
-            
         return df
 
     def calculate_tier_metrics(self, tiered_data: pd.DataFrame) -> Dict[int, Dict]:
@@ -106,7 +111,11 @@ class RotationDetector:
         Returns:
             pd.DataFrame: Correlation matrix between tiers
         """
-        correlations = pd.DataFrame(index=range(4), columns=range(4))
+        correlations = pd.DataFrame(
+            1.0, 
+            index=range(4), 
+            columns=range(4)
+        )  # Initialize with 1.0
         
         for tier1 in range(4):
             for tier2 in range(4):
@@ -115,11 +124,13 @@ class RotationDetector:
                     tier2_returns = tiered_data[tiered_data['tier'] == tier2]['price_change_percentage_24h']
                     
                     if not tier1_returns.empty and not tier2_returns.empty:
-                        correlation = tier1_returns.corr(tier2_returns)
-                        correlations.loc[tier1, tier2] = correlation
-                else:
-                    correlations.loc[tier1, tier2] = 1.0
-                    
+                        # Ensure same length for correlation calculation
+                        min_len = min(len(tier1_returns), len(tier2_returns))
+                        correlation = tier1_returns[:min_len].corr(tier2_returns[:min_len])
+                        if pd.notna(correlation):
+                            correlations.loc[tier1, tier2] = correlation
+                            correlations.loc[tier2, tier1] = correlation  # Ensure symmetry
+                        
         return correlations
 
     def generate_rotation_signals(self, market_data: pd.DataFrame) -> List[RotationSignal]:
@@ -147,10 +158,15 @@ class RotationDetector:
                     # Calculate confidence factors
                     volume_factor = volume_anomalies[to_tier] - volume_anomalies[from_tier]
                     correlation_factor = correlations.loc[from_tier, to_tier]
-                    relative_strength = (
-                        tier_metrics[to_tier]['volume_mcap_ratio'] / 
-                        tier_metrics[from_tier]['volume_mcap_ratio']
-                    )
+                    
+                    # Protect against division by zero in relative strength
+                    from_ratio = tier_metrics[from_tier]['volume_mcap_ratio']
+                    if from_ratio > 0:
+                        relative_strength = (
+                            tier_metrics[to_tier]['volume_mcap_ratio'] / from_ratio
+                        )
+                    else:
+                        relative_strength = 0
                     
                     # Calculate overall confidence
                     confidence = np.mean([
